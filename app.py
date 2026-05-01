@@ -1,11 +1,8 @@
-# --- VISITOR/ACTION COUNTER ---
-total_votes_cast = len(tally_df)
-st.metric(label="📊 Community Engagement", value=f"{total_votes_cast} Votes Cast")
-
 import streamlit as st
 import requests
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
+import time
 
 # --- CONFIG ---
 DRAFT_ID = "1308917460388294656"
@@ -18,12 +15,10 @@ st.set_page_config(page_title="TizBos Draft War Room", layout="wide")
 # --- 1. DATA TRANSLATORS ---
 @st.cache_data(ttl=86400)
 def get_player_map():
-    # Pulling master player data for names and ADP
     return requests.get(f"https://api.sleeper.app/v1/players/{SPORT}").json()
 
 @st.cache_data
 def get_user_id(username):
-    # Identifying TizBos's Sleeper ID
     try:
         res = requests.get(f"https://api.sleeper.app/v1/user/{username}").json()
         return res.get('user_id')
@@ -33,25 +28,51 @@ def get_user_id(username):
 player_map = get_player_map()
 my_user_id = get_user_id(MY_USERNAME)
 
-# --- 2. LIVE DATA FETCHING ---
+# --- 2. LIVE DATA & CONNECTIONS ---
+conn = st.connection("gsheets", type=GSheetsConnection)
+
 def get_live_picks():
     return requests.get(f"https://api.sleeper.app/v1/draft/{DRAFT_ID}/picks").json()
 
-# Establish Google Sheets Connection
-conn = st.connection("gsheets", type=GSheetsConnection)
-
-def get_vote_tally():
+def get_sheet_data():
     try:
-        # Pulls existing votes from your Google Sheet
-        df = conn.read(spreadsheet=SHEET_URL, ttl="1s")
-        return df
+        # Pulls both votes and presence from the sheet
+        return conn.read(spreadsheet=SHEET_URL, ttl="1s")
     except:
-        return pd.DataFrame(columns=["Player", "Votes"])
+        return pd.DataFrame(columns=["Player", "Votes", "Session_ID", "Last_Seen"])
 
 picks = get_live_picks()
-tally_df = get_vote_tally()
+all_data = get_sheet_data()
 
-# --- 3. SIDEBAR: TEAM TIZBOS ---
+# --- 3. LIVE VISITOR COUNTER (Heartbeat Logic) ---
+# We use a session ID to track unique tabs
+if "user_session_id" not in st.session_state:
+    st.session_state.user_session_id = str(time.time())
+
+# Update this user's "Last Seen" time in the sheet
+current_time = time.time()
+presence_row = pd.DataFrame([{
+    "Session_ID": st.session_state.user_session_id, 
+    "Last_Seen": current_time
+}])
+
+# Clean up old users (who haven't been seen in 30 seconds)
+if "Last_Seen" in all_data.columns:
+    active_users_df = all_data[all_data["Last_Seen"] > (current_time - 30)]
+    active_count = active_users_df["Session_ID"].nunique()
+    # Ensure the current user is included in the count immediately
+    if active_count == 0: active_count = 1
+else:
+    active_count = 1
+
+# --- 4. HEADER & METRICS ---
+st.title("🏈 TizBos Draft War Room")
+m1, m2, m3 = st.columns(3)
+m1.metric("🟢 Live Now", f"{active_count} Users")
+m2.metric("🗳️ Total Votes", len(all_data[all_data["Votes"] == 1]) if "Votes" in all_data.columns else 0)
+m3.metric("📅 Birthday", "March 21")
+
+# --- 5. SIDEBAR: TEAM TIZBOS ---
 with st.sidebar:
     st.header(f"🛡️ Team {MY_USERNAME}")
     my_picks = [
@@ -62,14 +83,9 @@ with st.sidebar:
         for mp in my_picks:
             st.success(f"DRAFTED: {mp}")
     else:
-        st.info("Waiting to make your first selection.")
-    
-    st.divider()
-    st.write("💡 *Board updates live as picks are made.*")
+        st.info("Waiting for picks...")
 
-# --- 4. MAIN INTERFACE ---
-st.title("🏈 TizBos Draft War Room")
-
+# --- 6. MAIN INTERFACE ---
 col_board, col_vote = st.columns([2, 1])
 
 with col_board:
@@ -86,46 +102,32 @@ with col_board:
                 "Owner": "TIZBOS" if is_me else "OPPONENT",
                 "Is_Me": is_me
             })
+        df = pd.DataFrame(board_data).iloc[::-1]
         
-        df = pd.DataFrame(board_data).iloc[::-1] # Show latest picks at top
-        
-        # High-contrast color coding
         def color_pick_row(row):
-            # Dark Green for you, Dark Red for others
             color = 'background-color: #1b5e20; color: white' if row.Is_Me else 'background-color: #b71c1c; color: white'
             return [color] * len(row)
 
         st.table(df[['Pick', 'Player', 'Pos', 'Team', 'Owner']].style.apply(color_pick_row, axis=1))
     else:
-        st.info("Draft hasn't started yet. Board will populate automatically.")
+        st.info("Draft hasn't started yet.")
 
 with col_vote:
     st.subheader("🗳️ Community Tally")
-    
-    # Show the current vote leaderboard
-    if not tally_df.empty and "Player" in tally_df.columns:
-        # Tally and sort
-        vote_counts = tally_df.groupby("Player").size().reset_index(name='Total Votes')
+    if not all_data.empty and "Player" in all_data.columns:
+        vote_counts = all_data[all_data["Votes"] == 1].groupby("Player").size().reset_index(name='Total Votes')
         vote_counts = vote_counts.sort_values(by='Total Votes', ascending=False)
         st.dataframe(vote_counts, hide_index=True, use_container_width=True)
-    else:
-        st.write("No votes cast yet. Be the first!")
 
     st.divider()
-    
-    # Voting Logic
     st.write("**Who should TizBos draft next?**")
     drafted_ids = {str(p['player_id']) for p in picks}
     
-    # Filter for top 25 available by ADP
     avail = []
     for p_id, info in player_map.items():
         if p_id not in drafted_ids and info.get('active'):
             adp = info.get('search_rank') or 999
-            avail.append({
-                "name": f"{info.get('first_name')} {info.get('last_name')} ({info.get('position')})",
-                "adp": adp
-            })
+            avail.append({"name": f"{info.get('first_name')} {info.get('last_name')} ({info.get('position')})", "adp": adp})
     
     top_options = sorted(avail, key=lambda x: x['adp'])[:25]
     player_names = [p['name'] for p in top_options]
@@ -134,10 +136,19 @@ with col_vote:
     
     if st.button("Cast Vote"):
         if vote_choice != "-- Choose Player --":
-            # Append new vote to the Google Sheet
-            new_row = pd.DataFrame([{"Player": vote_choice, "Votes": 1}])
-            updated_df = pd.concat([tally_df, new_row], ignore_index=True)
+            # Record vote and session presence simultaneously
+            new_vote = pd.DataFrame([{
+                "Player": vote_choice, 
+                "Votes": 1, 
+                "Session_ID": st.session_state.user_session_id, 
+                "Last_Seen": time.time()
+            }])
+            updated_df = pd.concat([all_data, new_vote], ignore_index=True)
             conn.update(spreadsheet=SHEET_URL, data=updated_df)
             st.balloons()
-            st.success(f"Vote recorded for {vote_choice}!")
             st.rerun()
+
+# This hidden line keeps the "Last Seen" updating even if they don't vote
+if time.time() - presence_row["Last_Seen"].iloc[0] > 10:
+    updated_df = pd.concat([all_data, presence_row], ignore_index=True)
+    conn.update(spreadsheet=SHEET_URL, data=updated_df)
