@@ -53,7 +53,6 @@ presence_row = pd.DataFrame([{
     "Last_Seen": current_time
 }])
 
-# Calculate how many people are active (seen in last 30 seconds)
 if "Last_Seen" in all_data.columns:
     active_users_df = all_data[all_data["Last_Seen"] > (current_time - 30)]
     active_count = active_users_df["Session_ID"].nunique()
@@ -122,9 +121,13 @@ with col_vote:
     for p_id, info in player_map.items():
         if p_id not in drafted_ids and info.get('active'):
             adp = info.get('search_rank') or 999
-            avail.append({"name": f"{info.get('first_name')} {info.get('last_name')} ({info.get('position')})", "adp": adp})
+            avail.append({
+                "name": f"{info.get('first_name')} {info.get('last_name')} ({info.get('position')})", 
+                "adp": adp
+            })
     
-    top_options = sorted(avail, key=lambda x: x['adp'])[:25]
+    # INCREASED LIMIT: Changed from 25 to 300 to allow full searching
+    top_options = sorted(avail, key=lambda x: x['adp'])[:300]
     player_names = [p['name'] for p in top_options]
     
     vote_choice = st.selectbox("Select a player:", ["-- Choose Player --"] + player_names)
