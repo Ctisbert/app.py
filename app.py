@@ -36,7 +36,6 @@ def get_live_picks():
 
 def get_sheet_data():
     try:
-        # Pulls both votes and presence from the sheet
         return conn.read(spreadsheet=SHEET_URL, ttl="1s")
     except:
         return pd.DataFrame(columns=["Player", "Votes", "Session_ID", "Last_Seen"])
@@ -44,33 +43,29 @@ def get_sheet_data():
 picks = get_live_picks()
 all_data = get_sheet_data()
 
-# --- 3. LIVE VISITOR COUNTER (Heartbeat Logic) ---
-# We use a session ID to track unique tabs
+# --- 3. LIVE VISITOR COUNTER ---
 if "user_session_id" not in st.session_state:
     st.session_state.user_session_id = str(time.time())
 
-# Update this user's "Last Seen" time in the sheet
 current_time = time.time()
 presence_row = pd.DataFrame([{
     "Session_ID": st.session_state.user_session_id, 
     "Last_Seen": current_time
 }])
 
-# Clean up old users (who haven't been seen in 30 seconds)
+# Calculate how many people are active (seen in last 30 seconds)
 if "Last_Seen" in all_data.columns:
     active_users_df = all_data[all_data["Last_Seen"] > (current_time - 30)]
     active_count = active_users_df["Session_ID"].nunique()
-    # Ensure the current user is included in the count immediately
     if active_count == 0: active_count = 1
 else:
     active_count = 1
 
 # --- 4. HEADER & METRICS ---
 st.title("🏈 TizBos Draft War Room")
-m1, m2, m3 = st.columns(3)
+m1, m2 = st.columns(2)
 m1.metric("🟢 Live Now", f"{active_count} Users")
-m2.metric("🗳️ Total Votes", len(all_data[all_data["Votes"] == 1]) if "Votes" in all_data.columns else 0)
-m3.metric("📅 Birthday", "March 21")
+m2.metric("🗳️ Total Votes Cast", len(all_data[all_data["Votes"] == 1]) if "Votes" in all_data.columns else 0)
 
 # --- 5. SIDEBAR: TEAM TIZBOS ---
 with st.sidebar:
@@ -110,7 +105,7 @@ with col_board:
 
         st.table(df[['Pick', 'Player', 'Pos', 'Team', 'Owner']].style.apply(color_pick_row, axis=1))
     else:
-        st.info("Draft hasn't started yet.")
+        st.info("Draft hasn't started yet. Board will populate automatically.")
 
 with col_vote:
     st.subheader("🗳️ Community Tally")
@@ -136,7 +131,6 @@ with col_vote:
     
     if st.button("Cast Vote"):
         if vote_choice != "-- Choose Player --":
-            # Record vote and session presence simultaneously
             new_vote = pd.DataFrame([{
                 "Player": vote_choice, 
                 "Votes": 1, 
@@ -147,8 +141,3 @@ with col_vote:
             conn.update(spreadsheet=SHEET_URL, data=updated_df)
             st.balloons()
             st.rerun()
-
-# This hidden line keeps the "Last Seen" updating even if they don't vote
-if time.time() - presence_row["Last_Seen"].iloc[0] > 10:
-    updated_df = pd.concat([all_data, presence_row], ignore_index=True)
-    conn.update(spreadsheet=SHEET_URL, data=updated_df)
