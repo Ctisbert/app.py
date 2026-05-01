@@ -1,3 +1,7 @@
+# --- VISITOR/ACTION COUNTER ---
+total_votes_cast = len(tally_df)
+st.metric(label="📊 Community Engagement", value=f"{total_votes_cast} Votes Cast")
+
 import streamlit as st
 import requests
 import pandas as pd
