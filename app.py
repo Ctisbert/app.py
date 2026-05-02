@@ -9,12 +9,12 @@ MY_USER_ID = "1123419086659723264"
 
 st.set_page_config(page_title="TizBos War Room", layout="wide")
 
-# --- 2. MASTER ADP & ID MAPPING ---
-# I have mapped these to Sleeper IDs to prevent naming mismatches
+# --- 2. THE VAULT: OFFICIAL SLEEPER IDs (Verified May 2026) ---
+# We use these IDs as the "Source of Truth" to bypass naming issues
 PLAYER_VALUATION = {
+    "9221":  {"name": "Jahmyr Gibbs", "adp": 1.03},
     "10236": {"name": "Bijan Robinson", "adp": 1.01},
     "4046":  {"name": "Josh Allen", "adp": 1.02},
-    "9221":  {"name": "Jahmyr Gibbs", "adp": 1.03},
     "11613": {"name": "Drake Maye", "adp": 1.04},
     "7564":  {"name": "Ja'Marr Chase", "adp": 1.05},
     "9488":  {"name": "Jaxon Smith-Njigba", "adp": 1.06},
@@ -30,29 +30,43 @@ PLAYER_VALUATION = {
     "11612": {"name": "Malik Nabers", "adp": 16.0},
     "6770":  {"name": "Joe Burrow", "adp": 17.0},
     "6794":  {"name": "Justin Jefferson", "adp": 18.0},
-    "11560": {"name": "Devon Achane", "adp": 19.0}
+    "11560": {"name": "Devon Achane", "adp": 19.0},
+    "6783":  {"name": "CeeDee Lamb", "adp": 20.0},
+    "13102": {"name": "Omarion Hampton", "adp": 21.0},
+    "13103": {"name": "Colston Loveland", "adp": 22.0},
+    "8151":  {"name": "Drake London", "adp": 23.0}
 }
 
 # --- 3. FETCH DATA ---
 def fetch_picks():
     try:
-        return requests.get(f"https://api.sleeper.app/v1/draft/{DRAFT_ID}/picks").json()
+        r = requests.get(f"https://api.sleeper.app/v1/draft/{DRAFT_ID}/picks")
+        return r.json() if r.status_code == 200 else []
     except: return []
 
 # --- 4. RENDER WAR ROOM ---
 def run_app():
     picks = fetch_picks()
     current_pick = len(picks) + 1
-    
-    # CRITICAL FIX: Create a set of IDs that are already gone
     drafted_ids = {str(p.get('player_id')) for p in picks}
 
-    st.title(f"🚀 TizBos War Room | Pick {current_pick}")
+    # Sidebar Debugging
+    with st.sidebar:
+        debug = st.toggle("🔍 Enable ID Debugger")
+        if debug and picks:
+            st.write("Current IDs in Draft:")
+            debug_df = pd.DataFrame([{
+                "Player": f"{p['metadata'].get('first_name')} {p['metadata'].get('last_name')}",
+                "ID": p.get('player_id')
+            } for p in picks])
+            st.dataframe(debug_df, hide_index=True)
+
+    st.title(f"🛡️ TizBos War Room | Pick {current_pick}")
     
     col_board, col_smash = st.columns([2, 1])
 
     with col_board:
-        st.subheader("📊 Recent Picks")
+        st.subheader("📊 Draft History")
         if picks:
             history = []
             for p in picks:
@@ -61,14 +75,14 @@ def run_app():
                     "Player": f"{p['metadata'].get('first_name')} {p['metadata'].get('last_name')}",
                     "Status": "✅ MINE" if str(p.get('picked_by')) == MY_USER_ID else "❌ GONE"
                 })
-            st.table(pd.DataFrame(history).iloc[::-1].head(10))
+            st.table(pd.DataFrame(history).iloc[::-1].head(12))
 
     with col_smash:
-        st.subheader("🔥 Smash Alerts (+2 Threshold)")
+        st.subheader("🔥 Smash Alerts (+2 Target)")
         smashes = []
         
         for pid, data in PLAYER_VALUATION.items():
-            # Only show if the ID is NOT in the drafted list
+            # ABSOLUTE FILTER: If the ID is in the drafted set, skip it!
             if pid not in drafted_ids:
                 if current_pick >= (data['adp'] + 2):
                     smashes.append({
@@ -78,11 +92,12 @@ def run_app():
                     })
 
         if smashes:
-            st.success("VALUES FOUND!")
+            st.success(f"VALUE FOUND AT PICK {current_pick}")
             st.dataframe(pd.DataFrame(smashes), hide_index=True)
         else:
-            st.info("Market is efficient.")
+            st.info("Market is currently efficient.")
 
+# Execute and Auto-refresh
 run_app()
-time.sleep(20)
+time.sleep(15)
 st.rerun()
