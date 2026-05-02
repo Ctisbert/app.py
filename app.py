@@ -12,7 +12,7 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1oi03c9o5-KKYYDhamPR7WggPHHs
 
 st.set_page_config(page_title="TizBos War Room", layout="wide")
 
-# --- 2. UPDATED ADP DATA (Drafted from your provided list) ---
+# --- 2. ADP DATA (Based on your provided May 2026 Startup list) ---
 STARTUP_ADP = {
     "Christian Watson": 101.2, "Chris Godwin": 145.1, "Mark Andrews": 146.6,
     "Kenneth Gainwell": 148.9, "Michael Penix Jr.": 149.4, "Jacoby Brissett": 152.1,
@@ -30,11 +30,9 @@ STARTUP_ADP = {
 # --- 3. DATA PERSISTENCE ---
 @st.cache_data(ttl=86400)
 def fetch_master_players():
-    """Fetch the full NFL player database to map IDs."""
     return requests.get("https://api.sleeper.app/v1/players/nfl").json()
 
 def fetch_draft_picks():
-    """Fetch live draft picks."""
     try:
         return requests.get(f"https://api.sleeper.app/v1/draft/{DRAFT_ID}/picks").json()
     except:
@@ -56,7 +54,7 @@ def run_app():
     votes = get_voting_data()
     current_pick = len(picks) + 1
     
-    # BLACKLIST: Ensure drafted players are 100% gone from value lists
+    # Blacklist drafted players using IDs for absolute accuracy
     drafted_ids = {str(p.get('player_id')) for p in picks}
 
     st.title(f"🚀 TizBos War Room | Pick {current_pick}")
@@ -76,7 +74,7 @@ def run_app():
                     "Status": "✅ MINE" if is_you else "❌ GONE",
                     "is_me": is_you
                 })
-            df = pd.DataFrame(board).iloc[::-1] # Newest picks on top
+            df = pd.DataFrame(board).iloc[::-1]
             
             def row_color(row):
                 style = 'background-color: #1b5e20' if row.is_me else 'background-color: #424242'
@@ -87,35 +85,46 @@ def run_app():
             st.info("The board is waiting for the 1.01.")
 
     with col_intel:
-        # --- ID-BASED VALUE ENGINE ---
+        # --- REVISED SMASH ALERTS (Threshold: +2) ---
         st.subheader("🔥 Smash Alerts")
         smashes = []
         
         for name, adp in STARTUP_ADP.items():
-            # Find ID by name
             pid = next((k for k, v in player_db.items() 
                         if f"{v.get('first_name', '')} {v.get('last_name', '')}".lower() == name.lower()), None)
             
-            # Use the blacklist to ensure we don't show drafted players
             if pid and pid not in drafted_ids:
-                if current_pick > (adp + 4): # If falling 4+ spots past ADP
-                    smashes.append({"Player": name, "ADP": adp, "Value": f"+{round(current_pick - adp, 1)}"})
+                # UPDATED CRITERIA: Trigger alert if current pick is 2+ spots past ADP
+                if current_pick >= (adp + 2): 
+                    smashes.append({
+                        "Player": name, 
+                        "ADP": adp, 
+                        "Value": f"+{round(current_pick - adp, 1)} spots"
+                    })
 
         if smashes:
             st.success(f"VALUE DETECTED AT PICK {current_pick}!")
-            st.dataframe(pd.DataFrame(smashes), hide_index=True)
+            st.dataframe(pd.DataFrame(smashes), hide_index=True, use_container_width=True)
         else:
-            st.info("No extreme values detected currently.")
+            st.info("No major values falling past ADP yet.")
 
         # --- VOTING ---
         st.divider()
         st.subheader("🗳️ Vote Next Pick")
         
-        avail_names = [f"{v.get('first_name')} {v.get('last_name')} ({v.get('position')})" 
-                       for k, v in player_db.items() 
-                       if k not in drafted_ids and v.get('active')]
+        # Pull 300 available players for the dropdown
+        avail_players = []
+        for p_id, info in player_db.items():
+            if p_id not in drafted_ids and info.get('active'):
+                avail_players.append({
+                    "name": f"{info.get('first_name')} {info.get('last_name')} ({info.get('position')})",
+                    "rank": info.get('search_rank') or 999
+                })
         
-        vote_on = st.selectbox("Select Player:", ["-- Search --"] + sorted(avail_names))
+        top_300 = sorted(avail_players, key=lambda x: x['rank'])[:300]
+        options = [p['name'] for p in top_300]
+        
+        vote_on = st.selectbox("Select Player:", ["-- Search --"] + options)
         if st.button("Submit Vote"):
             if vote_on != "-- Search --":
                 new_v = pd.DataFrame([{"Player": vote_on, "Votes": 1, "Timestamp": time.time()}])
@@ -124,7 +133,7 @@ def run_app():
                 time.sleep(1)
                 st.rerun()
 
-# Run and auto-refresh heartbeat
+# Run the UI and refresh every 20 seconds
 run_app()
 time.sleep(20)
 st.rerun()
