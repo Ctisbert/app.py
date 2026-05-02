@@ -1,96 +1,88 @@
 import streamlit as st
 import requests
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
 import time
 
 # --- 1. CONFIGURATION ---
 DRAFT_ID = "1308917460388294656"
 MY_USER_ID = "1123419086659723264"
-MY_USERNAME = "TizBos"
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1oi03c9o5-KKYYDhamPR7WggPHHsTfwl9RYUlV2hqy_Q/edit?usp=sharing"
 
 st.set_page_config(page_title="TizBos War Room", layout="wide")
 
-# --- 2. DYNASTY DATA LAB ADP (May 1, 2026 Refresh) ---
-# Format: "Name": Startup_ADP
-STARTUP_ADP = {
-    "Bijan Robinson": 1.01, "Josh Allen": 1.02, "Jahmyr Gibbs": 1.03,
-    "Drake Maye": 1.04, "Ja'Marr Chase": 1.05, "Jaxon Smith-Njigba": 1.06,
-    "Puka Nacua": 1.07, "Brock Bowers": 1.08, "Jeremiyah Love": 1.09,
-    "Trey McBride": 1.10, "Jayden Daniels": 11.0, "Caleb Williams": 12.0,
-    "Ashton Jeanty": 13.0, "Lamar Jackson": 14.0, "Amon-Ra St. Brown": 15.0,
-    "Malik Nabers": 16.0, "Joe Burrow": 17.0, "Justin Jefferson": 18.0,
-    "Devon Achane": 19.0, "CeeDee Lamb": 20.0, "Omarion Hampton": 21.0,
-    "Colston Loveland": 22.0, "Drake London": 23.0
+# --- 2. MASTER ADP & ID MAPPING ---
+# I have mapped these to Sleeper IDs to prevent naming mismatches
+PLAYER_VALUATION = {
+    "10236": {"name": "Bijan Robinson", "adp": 1.01},
+    "4046":  {"name": "Josh Allen", "adp": 1.02},
+    "9221":  {"name": "Jahmyr Gibbs", "adp": 1.03},
+    "11613": {"name": "Drake Maye", "adp": 1.04},
+    "7564":  {"name": "Ja'Marr Chase", "adp": 1.05},
+    "9488":  {"name": "Jaxon Smith-Njigba", "adp": 1.06},
+    "11559": {"name": "Puka Nacua", "adp": 1.07},
+    "11566": {"name": "Brock Bowers", "adp": 1.08},
+    "13100": {"name": "Jeremiyah Love", "adp": 1.09},
+    "11589": {"name": "Trey McBride", "adp": 1.10},
+    "11607": {"name": "Jayden Daniels", "adp": 11.0},
+    "11603": {"name": "Caleb Williams", "adp": 12.0},
+    "13101": {"name": "Ashton Jeanty", "adp": 13.0},
+    "4881":  {"name": "Lamar Jackson", "adp": 14.0},
+    "7547":  {"name": "Amon-Ra St. Brown", "adp": 15.0},
+    "11612": {"name": "Malik Nabers", "adp": 16.0},
+    "6770":  {"name": "Joe Burrow", "adp": 17.0},
+    "6794":  {"name": "Justin Jefferson", "adp": 18.0},
+    "11560": {"name": "Devon Achane", "adp": 19.0}
 }
 
-# --- 3. THE ENGINE ---
-@st.cache_data(ttl=86400)
-def fetch_master_data():
-    """Global Sleeper database for ID mapping."""
-    return requests.get("https://api.sleeper.app/v1/players/nfl").json()
-
-def fetch_live_draft():
-    """Live API check for current picks."""
+# --- 3. FETCH DATA ---
+def fetch_picks():
     try:
         return requests.get(f"https://api.sleeper.app/v1/draft/{DRAFT_ID}/picks").json()
     except: return []
 
-conn = st.connection("gsheets", type=GSheetsConnection)
-player_db = fetch_master_data()
-
 # --- 4. RENDER WAR ROOM ---
-def run_war_room():
-    picks = fetch_live_draft()
+def run_app():
+    picks = fetch_picks()
     current_pick = len(picks) + 1
     
-    # BLACKLIST: Track drafted IDs instead of names
+    # CRITICAL FIX: Create a set of IDs that are already gone
     drafted_ids = {str(p.get('player_id')) for p in picks}
 
     st.title(f"🚀 TizBos War Room | Pick {current_pick}")
     
-    col_board, col_intel = st.columns([2, 1])
+    col_board, col_smash = st.columns([2, 1])
 
     with col_board:
-        st.subheader("📊 Draft Progress")
+        st.subheader("📊 Recent Picks")
         if picks:
-            board = []
+            history = []
             for p in picks:
-                is_you = str(p.get('picked_by')) == MY_USER_ID
-                board_data = {
+                history.append({
                     "Pick": p['pick_no'],
                     "Player": f"{p['metadata'].get('first_name')} {p['metadata'].get('last_name')}",
-                    "Pos": p['metadata'].get('position'),
-                    "Status": "✅ MINE" if is_you else "❌ GONE"
-                }
-                board.append(board_data)
-            st.table(pd.DataFrame(board).iloc[::-1])
-        else:
-            st.info("The board is clear. Awaiting 1.01.")
+                    "Status": "✅ MINE" if str(p.get('picked_by')) == MY_USER_ID else "❌ GONE"
+                })
+            st.table(pd.DataFrame(history).iloc[::-1].head(10))
 
-    with col_intel:
-        # --- THE SMASH ENGINE (ID-BASED) ---
-        st.subheader("🔥 Smash Alerts (+2 Target)")
+    with col_smash:
+        st.subheader("🔥 Smash Alerts (+2 Threshold)")
         smashes = []
         
-        for name, adp in STARTUP_ADP.items():
-            # Find the unique ID for the player on your list
-            p_id = next((k for k, v in player_db.items() 
-                        if f"{v.get('first_name', '')} {v.get('last_name', '')}".lower() == name.lower()), None)
-            
-            # Cross-reference against the drafted blacklist
-            if p_id and p_id not in drafted_ids:
-                if current_pick >= (adp + 2):
-                    smashes.append({"Player": name, "ADP": adp, "Value": f"+{round(current_pick - adp, 1)}"})
+        for pid, data in PLAYER_VALUATION.items():
+            # Only show if the ID is NOT in the drafted list
+            if pid not in drafted_ids:
+                if current_pick >= (data['adp'] + 2):
+                    smashes.append({
+                        "Player": data['name'],
+                        "ADP": data['adp'],
+                        "Value": f"+{round(current_pick - data['adp'], 1)}"
+                    })
 
         if smashes:
-            st.success("WE HAVE VALUE DETECTED!")
+            st.success("VALUES FOUND!")
             st.dataframe(pd.DataFrame(smashes), hide_index=True)
         else:
-            st.info("Market is efficient. No smashes available.")
+            st.info("Market is efficient.")
 
-# Initial Run and Background Refresh
-run_war_room()
+run_app()
 time.sleep(20)
 st.rerun()
