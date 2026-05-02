@@ -95,17 +95,18 @@ with col_board:
                 "is_me": is_me
             })
         
-        # Create DataFrame and sort newest first
         df = pd.DataFrame(board_list).iloc[::-1]
         
-        # Define the styling function using the 'is_me' column directly
         def apply_row_style(row):
             color = 'background-color: #1b5e20; color: white' if row.is_me else 'background-color: #b71c1c; color: white'
             return [color] * len(row)
 
-        # Apply style to all columns, then display only the ones we want
+        # Corrected styling and hiding logic
         styled_df = df.style.apply(apply_row_style, axis=1)
-        st.table(styled_df.hide(axis="index").columns(['Pick', 'Player', 'Pos', 'Team', 'Owner']))
+        # Hide the index and the 'is_me' column correctly
+        styled_df = styled_df.hide(axis="index").hide(subset=["is_me"], axis="columns")
+        
+        st.table(styled_df)
     else:
         st.info("No picks made yet. The board will appear once the first player is drafted!")
 
