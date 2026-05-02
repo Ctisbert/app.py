@@ -32,7 +32,10 @@ my_user_id = get_user_id(MY_USERNAME)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_live_picks():
-    return requests.get(f"https://api.sleeper.app/v1/draft/{DRAFT_ID}/picks").json()
+    try:
+        return requests.get(f"https://api.sleeper.app/v1/draft/{DRAFT_ID}/picks").json()
+    except:
+        return []
 
 def get_sheet_data():
     try:
@@ -84,27 +87,31 @@ col_board, col_vote = st.columns([2, 1])
 
 with col_board:
     st.subheader("📜 Live Draft Board")
-    if picks:
+    if picks and len(picks) > 0:
         board_data = []
         for p in picks:
             is_me = str(p.get('picked_by')) == str(my_user_id)
             board_data.append({
                 "Pick": p['pick_no'],
-                "Player": f"{p['metadata']['first_name']} {p['metadata']['last_name']}",
-                "Pos": p['metadata']['position'],
-                "Team": p['metadata']['team'],
+                "Player": f"{p['metadata'].get('first_name', '')} {p['metadata'].get('last_name', '')}",
+                "Pos": p['metadata'].get('position', 'N/A'),
+                "Team": p['metadata'].get('team', 'N/A'),
                 "Owner": "TIZBOS" if is_me else "OPPONENT",
                 "Is_Me": is_me
             })
+        
         df = pd.DataFrame(board_data).iloc[::-1]
         
+        # Color function with safety check
         def color_pick_row(row):
-            color = 'background-color: #1b5e20; color: white' if row.Is_Me else 'background-color: #b71c1c; color: white'
-            return [color] * len(row)
+            if row.Is_Me:
+                return ['background-color: #1b5e20; color: white'] * len(row)
+            return ['background-color: #b71c1c; color: white'] * len(row)
 
+        # We display the table only if df is not empty
         st.table(df[['Pick', 'Player', 'Pos', 'Team', 'Owner']].style.apply(color_pick_row, axis=1))
     else:
-        st.info("Draft hasn't started yet. Board will populate automatically.")
+        st.info("No picks made yet. The board will appear once the first player is drafted!")
 
 with col_vote:
     st.subheader("🗳️ Community Tally")
@@ -126,7 +133,6 @@ with col_vote:
                 "adp": adp
             })
     
-    # INCREASED LIMIT: Changed from 25 to 300 to allow full searching
     top_options = sorted(avail, key=lambda x: x['adp'])[:300]
     player_names = [p['name'] for p in top_options]
     
