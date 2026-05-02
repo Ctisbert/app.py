@@ -4,145 +4,127 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 import time
 
-# --- 1. CONFIGURATION & IDENTITY ---
+# --- 1. CONFIGURATION ---
 DRAFT_ID = "1308917460388294656"
 MY_USER_ID = "1123419086659723264"
 MY_USERNAME = "TizBos"
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1oi03c9o5-KKYYDhamPR7WggPHHsTfwl9RYUlV2hqy_Q/edit?usp=sharing"
 
-st.set_page_config(page_title="TizBos War Room", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TizBos War Room", layout="wide")
 
-# --- 2. DATA ENGINES (Caching for Speed) ---
+# --- 2. UPDATED ADP DATA (Drafted from your provided list) ---
+STARTUP_ADP = {
+    "Christian Watson": 101.2, "Chris Godwin": 145.1, "Mark Andrews": 146.6,
+    "Kenneth Gainwell": 148.9, "Michael Penix Jr.": 149.4, "Jacoby Brissett": 152.1,
+    "Shedeur Sanders": 152.2, "Elijah Sarratt": 152.4, "Tony Pollard": 153.3,
+    "Tua Tagovailoa": 154.6, "Emmett Johnson": 154.8, "Chigoziem Okonkwo": 155.4,
+    "Travis Kelce": 155.6, "Germie Bernard": 156.4, "Woody Marks": 156.6,
+    "Juwan Johnson": 156.9, "Khalil Shakir": 157.4, "Gunnar Helm": 157.6,
+    "T.J. Hockenson": 157.8, "Dallas Goedert": 157.9, "Jalen McMillan": 158.0,
+    "Jordan Mason": 158.6, "Rachaad White": 161.8, "Mason Taylor": 162.2,
+    "Zachariah Branch": 163.0, "Chris Brazzell": 163.0, "J.J. McCarthy": 166.2,
+    "Geno Smith": 169.2, "Tre Harris": 170.9, "Antonio Williams": 171.2,
+    "Brandon Aiyuk": 171.8
+}
+
+# --- 3. DATA PERSISTENCE ---
 @st.cache_data(ttl=86400)
-def fetch_master_player_data():
-    """Download the full NFL player database once per day."""
+def fetch_master_players():
+    """Fetch the full NFL player database to map IDs."""
     return requests.get("https://api.sleeper.app/v1/players/nfl").json()
 
-def get_live_state():
-    """Get real-time draft status and picks."""
+def fetch_draft_picks():
+    """Fetch live draft picks."""
     try:
         return requests.get(f"https://api.sleeper.app/v1/draft/{DRAFT_ID}/picks").json()
     except:
         return []
 
-# Connect to the Voting Ledger
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def get_votes():
+def get_voting_data():
     try:
         return conn.read(spreadsheet=SHEET_URL, ttl="1s")
     except:
         return pd.DataFrame(columns=["Player", "Votes", "Timestamp"])
 
-# --- 3. THE "SMASH" LOGIC (Market Value vs. Live Draft) ---
-# Sourced from Dynasty Data Lab May 2026 Startup ADP
-STARTUP_ADP = {
-    "Bijan Robinson": 1.01, "Josh Allen": 1.02, "Jahmyr Gibbs": 1.03, "Drake Maye": 1.04,
-    "Ja'Marr Chase": 1.05, "Jaxon Smith-Njigba": 1.06, "Puka Nacua": 1.07, "Brock Bowers": 1.08,
-    "Trey McBride": 1.10, "Jeremiyah Love": 1.09, "Ashton Jeanty": 1.11, "Amon-Ra St. Brown": 1.13,
-    "Caleb Williams": 1.14, "Malik Nabers": 1.15, "Lamar Jackson": 1.16, "Joe Burrow": 1.17,
-    "Justin Jefferson": 1.18, "Devon Achane": 1.19, "CeeDee Lamb": 1.20, "Omarion Hampton": 1.21,
-    "Colston Loveland": 1.22, "Drake London": 1.23, "Jaxson Dart": 1.24, "Justin Herbert": 1.25,
-    "Tetairoa McMillan": 1.26, "Patrick Mahomes": 1.27, "Jonathan Taylor": 1.28, "James Cook": 1.29,
-    "Tyler Warren": 1.30, "Trevor Lawrence": 1.31, "Jalen Hurts": 1.32, "Bo Nix": 1.33,
-    "George Pickens": 1.34, "Emeka Egbuka": 1.35, "Chris Olave": 1.36, "Harold Fannin": 1.37,
-    "Brock Purdy": 1.38, "Kenneth Walker III": 1.39, "Nico Collins": 1.40
-}
+player_db = fetch_master_players()
 
-# --- 4. EXECUTION ENGINE ---
-player_db = fetch_master_player_data()
-
-def run_war_room():
-    picks = get_live_state()
-    votes_df = get_votes()
+# --- 4. CORE INTERFACE ---
+def run_app():
+    picks = fetch_draft_picks()
+    votes = get_voting_data()
     current_pick = len(picks) + 1
     
-    # BLACKLIST: Every player already taken (ID-based for 100% accuracy)
+    # BLACKLIST: Ensure drafted players are 100% gone from value lists
     drafted_ids = {str(p.get('player_id')) for p in picks}
 
-    # UI HEADER
-    st.title(f"🛡️ {MY_USERNAME} War Room: Pick {current_pick} On the Clock")
+    st.title(f"🚀 TizBos War Room | Pick {current_pick}")
     
     col_board, col_intel = st.columns([2, 1])
 
     with col_board:
-        st.subheader("📊 Live Draft Board")
+        st.subheader("📊 Draft Progress")
         if picks:
-            # Construct board from newest to oldest
-            board_data = []
+            board = []
             for p in picks:
-                is_tizbos = str(p.get('picked_by')) == MY_USER_ID
-                board_data.append({
+                is_you = str(p.get('picked_by')) == MY_USER_ID
+                board.append({
                     "Pick": p['pick_no'],
                     "Player": f"{p['metadata'].get('first_name')} {p['metadata'].get('last_name')}",
                     "Pos": p['metadata'].get('position'),
-                    "Owner": "✅ TIZBOS" if is_tizbos else "❌ OPPONENT",
-                    "is_me": is_tizbos
+                    "Status": "✅ MINE" if is_you else "❌ GONE",
+                    "is_me": is_you
                 })
-            df = pd.DataFrame(board_data).iloc[::-1]
+            df = pd.DataFrame(board).iloc[::-1] # Newest picks on top
             
-            # Highlight TizBos picks in Green, Opponents in Dark Red
-            def style_rows(row):
-                bg = 'background-color: #06402B' if row.is_me else 'background-color: #3D0C02'
-                return [f'{bg}; color: white'] * len(row)
+            def row_color(row):
+                style = 'background-color: #1b5e20' if row.is_me else 'background-color: #424242'
+                return [f'{style}; color: white'] * len(row)
             
-            st.table(df.style.apply(style_rows, axis=1).hide(axis="index").hide(subset=["is_me"], axis="columns"))
+            st.table(df.style.apply(row_color, axis=1).hide(axis="index").hide(subset=["is_me"], axis="columns"))
         else:
-            st.info("The board is clear. Waiting for the first pick.")
+            st.info("The board is waiting for the 1.01.")
 
     with col_intel:
-        # --- THE SMASH ENGINE ---
-        st.subheader("🔥 Market Value Smashes")
+        # --- ID-BASED VALUE ENGINE ---
+        st.subheader("🔥 Smash Alerts")
         smashes = []
         
-        # Cross-reference ADP dictionary with Sleeper IDs to ensure accuracy
-        for name, adp_val in STARTUP_ADP.items():
-            # Find the ID for the name in our list
-            p_id = next((k for k, v in player_db.items() 
-                        if f"{v.get('first_name')} {v.get('last_name')}".lower() == name.lower()), None)
+        for name, adp in STARTUP_ADP.items():
+            # Find ID by name
+            pid = next((k for k, v in player_db.items() 
+                        if f"{v.get('first_name', '')} {v.get('last_name', '')}".lower() == name.lower()), None)
             
-            # If the ID exists and isn't in the blacklist, it's available
-            if p_id and p_id not in drafted_ids:
-                # If they've fallen 3+ spots past their ADP, flag it
-                if current_pick > (adp_val + 3):
-                    diff = current_pick - adp_val
-                    smashes.append({"Player": name, "Value": f"+{round(diff, 1)} Spots"})
-        
-        if smashes:
-            st.success("WE HAVE VALUE ON THE BOARD")
-            st.dataframe(pd.DataFrame(smashes), hide_index=True, use_container_width=True)
-        else:
-            st.info("Market is efficient. No major smashes available.")
+            # Use the blacklist to ensure we don't show drafted players
+            if pid and pid not in drafted_ids:
+                if current_pick > (adp + 4): # If falling 4+ spots past ADP
+                    smashes.append({"Player": name, "ADP": adp, "Value": f"+{round(current_pick - adp, 1)}"})
 
-        # --- VOTING SYSTEM ---
+        if smashes:
+            st.success(f"VALUE DETECTED AT PICK {current_pick}!")
+            st.dataframe(pd.DataFrame(smashes), hide_index=True)
+        else:
+            st.info("No extreme values detected currently.")
+
+        # --- VOTING ---
         st.divider()
-        st.subheader("🗳️ Next Pick Tally")
+        st.subheader("🗳️ Vote Next Pick")
         
-        # Dynamic search for top 300 available
-        avail = []
-        for p_id, info in player_db.items():
-            if p_id not in drafted_ids and info.get('active'):
-                avail.append({
-                    "display": f"{info.get('first_name')} {info.get('last_name')} ({info.get('position')})",
-                    "rank": info.get('search_rank') or 999
-                })
+        avail_names = [f"{v.get('first_name')} {v.get('last_name')} ({v.get('position')})" 
+                       for k, v in player_db.items() 
+                       if k not in drafted_ids and v.get('active')]
         
-        top_300 = sorted(avail, key=lambda x: x['rank'])[:300]
-        options = [p['display'] for p in top_300]
-        
-        selection = st.selectbox("Search Draftable Players:", ["-- Select --"] + options)
+        vote_on = st.selectbox("Select Player:", ["-- Search --"] + sorted(avail_names))
         if st.button("Submit Vote"):
-            if selection != "-- Select --":
-                new_v = pd.DataFrame([{"Player": selection, "Votes": 1, "Timestamp": time.time()}])
-                conn.update(spreadsheet=SHEET_URL, data=pd.concat([votes_df, new_v]))
-                st.toast(f"Vote cast for {selection}!")
+            if vote_on != "-- Search --":
+                new_v = pd.DataFrame([{"Player": vote_on, "Votes": 1, "Timestamp": time.time()}])
+                conn.update(spreadsheet=SHEET_URL, data=pd.concat([votes, new_v]))
+                st.toast("Vote Recorded.")
                 time.sleep(1)
                 st.rerun()
 
-# --- 5. THE LIVE HEARTBEAT ---
-# This forces the app to update even if no one clicks anything
-run_war_room()
-
-# Auto-refresh every 20 seconds to keep the board live
+# Run and auto-refresh heartbeat
+run_app()
 time.sleep(20)
 st.rerun()
