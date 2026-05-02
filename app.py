@@ -7,24 +7,22 @@ import time
 # --- 1. CONFIGURATION ---
 DRAFT_ID = "1308917460388294656"
 MY_USER_ID = "1123419086659723264"
-MY_USERNAME = "TizBos"
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1oi03c9o5-KKYYDhamPR7WggPHHsTfwl9RYUlV2hqy_Q/edit?usp=sharing"
 
 st.set_page_config(page_title="TizBos War Room", layout="wide")
 
-# --- 2. ADP DATA (Based on your provided May 2026 Startup list) ---
+# --- 2. UPDATED ADP DATA (Dynasty Data Lab - May 2026) ---
+# Pulled from real Sleeper startup drafts
 STARTUP_ADP = {
-    "Christian Watson": 101.2, "Chris Godwin": 145.1, "Mark Andrews": 146.6,
-    "Kenneth Gainwell": 148.9, "Michael Penix Jr.": 149.4, "Jacoby Brissett": 152.1,
-    "Shedeur Sanders": 152.2, "Elijah Sarratt": 152.4, "Tony Pollard": 153.3,
-    "Tua Tagovailoa": 154.6, "Emmett Johnson": 154.8, "Chigoziem Okonkwo": 155.4,
-    "Travis Kelce": 155.6, "Germie Bernard": 156.4, "Woody Marks": 156.6,
-    "Juwan Johnson": 156.9, "Khalil Shakir": 157.4, "Gunnar Helm": 157.6,
-    "T.J. Hockenson": 157.8, "Dallas Goedert": 157.9, "Jalen McMillan": 158.0,
-    "Jordan Mason": 158.6, "Rachaad White": 161.8, "Mason Taylor": 162.2,
-    "Zachariah Branch": 163.0, "Chris Brazzell": 163.0, "J.J. McCarthy": 166.2,
-    "Geno Smith": 169.2, "Tre Harris": 170.9, "Antonio Williams": 171.2,
-    "Brandon Aiyuk": 171.8
+    "Bijan Robinson": 1.01, "Josh Allen": 1.02, "Jahmyr Gibbs": 1.03,
+    "Drake Maye": 1.04, "Ja'Marr Chase": 1.05, "Jaxon Smith-Njigba": 1.06,
+    "Puka Nacua": 1.07, "Brock Bowers": 1.08, "Jeremiyah Love": 1.09,
+    "Trey McBride": 1.10, "Jayden Daniels": 11.0, "Caleb Williams": 12.0,
+    "Ashton Jeanty": 13.0, "Lamar Jackson": 14.0, "Amon-Ra St. Brown": 15.0,
+    "Malik Nabers": 16.0, "Joe Burrow": 17.0, "Justin Jefferson": 18.0,
+    "Devon Achane": 19.0, "CeeDee Lamb": 20.0, "Omarion Hampton": 21.0,
+    "Colston Loveland": 22.0, "Drake London": 23.0, "Emeka Egbuka": 35.0,
+    "Luther Burden": 50.0, "Parker Washington": 104.0
 }
 
 # --- 3. DATA PERSISTENCE ---
@@ -35,26 +33,15 @@ def fetch_master_players():
 def fetch_draft_picks():
     try:
         return requests.get(f"https://api.sleeper.app/v1/draft/{DRAFT_ID}/picks").json()
-    except:
-        return []
+    except: return []
 
 conn = st.connection("gsheets", type=GSheetsConnection)
-
-def get_voting_data():
-    try:
-        return conn.read(spreadsheet=SHEET_URL, ttl="1s")
-    except:
-        return pd.DataFrame(columns=["Player", "Votes", "Timestamp"])
-
 player_db = fetch_master_players()
 
 # --- 4. CORE INTERFACE ---
 def run_app():
     picks = fetch_draft_picks()
-    votes = get_voting_data()
     current_pick = len(picks) + 1
-    
-    # Blacklist drafted players using IDs for absolute accuracy
     drafted_ids = {str(p.get('player_id')) for p in picks}
 
     st.title(f"🚀 TizBos War Room | Pick {current_pick}")
@@ -71,21 +58,14 @@ def run_app():
                     "Pick": p['pick_no'],
                     "Player": f"{p['metadata'].get('first_name')} {p['metadata'].get('last_name')}",
                     "Pos": p['metadata'].get('position'),
-                    "Status": "✅ MINE" if is_you else "❌ GONE",
-                    "is_me": is_you
+                    "Status": "✅ MINE" if is_you else "❌ GONE"
                 })
-            df = pd.DataFrame(board).iloc[::-1]
-            
-            def row_color(row):
-                style = 'background-color: #1b5e20' if row.is_me else 'background-color: #424242'
-                return [f'{style}; color: white'] * len(row)
-            
-            st.table(df.style.apply(row_color, axis=1).hide(axis="index").hide(subset=["is_me"], axis="columns"))
+            st.table(pd.DataFrame(board).iloc[::-1])
         else:
-            st.info("The board is waiting for the 1.01.")
+            st.info("Draft starting soon...")
 
     with col_intel:
-        # --- REVISED SMASH ALERTS (Threshold: +2) ---
+        # --- SMASH ALERTS (+2 Threshold) ---
         st.subheader("🔥 Smash Alerts")
         smashes = []
         
@@ -94,46 +74,15 @@ def run_app():
                         if f"{v.get('first_name', '')} {v.get('last_name', '')}".lower() == name.lower()), None)
             
             if pid and pid not in drafted_ids:
-                # UPDATED CRITERIA: Trigger alert if current pick is 2+ spots past ADP
-                if current_pick >= (adp + 2): 
-                    smashes.append({
-                        "Player": name, 
-                        "ADP": adp, 
-                        "Value": f"+{round(current_pick - adp, 1)} spots"
-                    })
+                if current_pick >= (adp + 2):
+                    smashes.append({"Player": name, "ADP": adp, "Value": f"+{round(current_pick - adp, 1)}"})
 
         if smashes:
-            st.success(f"VALUE DETECTED AT PICK {current_pick}!")
-            st.dataframe(pd.DataFrame(smashes), hide_index=True, use_container_width=True)
+            st.success(f"VALUE DETECTED!")
+            st.dataframe(pd.DataFrame(smashes), hide_index=True)
         else:
-            st.info("No major values falling past ADP yet.")
+            st.info("Market is efficient. No smashes yet.")
 
-        # --- VOTING ---
-        st.divider()
-        st.subheader("🗳️ Vote Next Pick")
-        
-        # Pull 300 available players for the dropdown
-        avail_players = []
-        for p_id, info in player_db.items():
-            if p_id not in drafted_ids and info.get('active'):
-                avail_players.append({
-                    "name": f"{info.get('first_name')} {info.get('last_name')} ({info.get('position')})",
-                    "rank": info.get('search_rank') or 999
-                })
-        
-        top_300 = sorted(avail_players, key=lambda x: x['rank'])[:300]
-        options = [p['name'] for p in top_300]
-        
-        vote_on = st.selectbox("Select Player:", ["-- Search --"] + options)
-        if st.button("Submit Vote"):
-            if vote_on != "-- Search --":
-                new_v = pd.DataFrame([{"Player": vote_on, "Votes": 1, "Timestamp": time.time()}])
-                conn.update(spreadsheet=SHEET_URL, data=pd.concat([votes, new_v]))
-                st.toast("Vote Recorded.")
-                time.sleep(1)
-                st.rerun()
-
-# Run the UI and refresh every 20 seconds
 run_app()
 time.sleep(20)
 st.rerun()
