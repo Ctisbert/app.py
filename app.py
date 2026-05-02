@@ -13,7 +13,6 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1oi03c9o5-KKYYDhamPR7WggPHHs
 st.set_page_config(page_title="TizBos Draft War Room", layout="wide")
 
 # --- 1. STARTUP ADP DATA (May 2026 Consensus) ---
-# Note: Ensure these names match Sleeper exactly (e.g. "Devon Achane" vs "De'Von Achane")
 startup_adp = {
     "Bijan Robinson": 1.01, "Josh Allen": 1.02, "Jahmyr Gibbs": 1.03, "Drake Maye": 1.04,
     "Ja'Marr Chase": 1.05, "Jaxon Smith-Njigba": 1.06, "Puka Nacua": 1.07, "Brock Bowers": 1.08,
@@ -27,12 +26,14 @@ startup_adp = {
     "Brock Purdy": 1.38, "Kenneth Walker III": 1.39, "Nico Collins": 1.40
 }
 
-# --- 2. DATA HELPERS ---
+# --- 2. DATA TRANSLATORS & HELPERS ---
 @st.cache_data(ttl=86400)
 def get_player_map():
+    """Fetch the master Sleeper player list to map names to IDs."""
     return requests.get(f"https://api.sleeper.app/v1/players/{SPORT}").json()
 
 def get_live_picks():
+    """Fetch live draft picks from Sleeper."""
     try:
         return requests.get(f"https://api.sleeper.app/v1/draft/{DRAFT_ID}/picks").json()
     except:
@@ -41,6 +42,7 @@ def get_live_picks():
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_sheet_data():
+    """Read voting data from Google Sheets."""
     try:
         return conn.read(spreadsheet=SHEET_URL, ttl="1s")
     except:
@@ -48,13 +50,14 @@ def get_sheet_data():
 
 player_map = get_player_map()
 
-# --- 3. LIVE REFRESH LOGIC ---
+# --- 3. SIDEBAR & LIVE TOGGLE ---
 with st.sidebar:
     st.title("Settings")
-    live_mode = st.toggle("🛰️ Live Refresh Mode", value=False)
+    live_mode = st.toggle("🛰️ Live Refresh Mode", value=False, help="Updates every 30 seconds.")
     st.divider()
     st.header(f"🛡️ Team {MY_USERNAME}")
-
+    
+# --- 4. MAIN INTERFACE ---
 st.title("🏈 TizBos Draft War Room")
 main_container = st.empty()
 
@@ -63,11 +66,8 @@ def render_content():
     all_data = get_sheet_data()
     current_pick_no = len(picks) + 1
     
-    # 1. CLEAN DRAFTED NAMES FOR BETTER MATCHING
-    drafted_names = [
-        f"{p['metadata'].get('first_name', '')} {p['metadata'].get('last_name', '')}".strip().lower() 
-        for p in picks
-    ]
+    # CRITICAL FIX: Create a set of IDs that are ALREADY DRAFTED
+    drafted_ids = {str(p.get('player_id')) for p in picks}
     
     with main_container.container():
         m1, m2 = st.columns(2)
@@ -87,33 +87,74 @@ def render_content():
                         "Player": f"{p['metadata'].get('first_name', '')} {p['metadata'].get('last_name', '')}",
                         "Pos": p['metadata'].get('position', 'N/A'),
                         "Team": p['metadata'].get('team', 'N/A'),
+                        "Owner": "TIZBOS" if is_me else "OPPONENT",
                         "is_me": is_me
                     })
                 df = pd.DataFrame(board_list).iloc[::-1]
-                st.table(df.style.hide(axis="index").hide(subset=["is_me"], axis="columns"))
+                
+                def apply_row_style(row):
+                    color = 'background-color: #1b5e20; color: white' if row.is_me else 'background-color: #b71c1c; color: white'
+                    return [color] * len(row)
+
+                styled_df = df.style.apply(apply_row_style, axis=1).hide(axis="index").hide(subset=["is_me"], axis="columns")
+                st.table(styled_df)
             else:
-                st.info("Draft starting soon...")
+                st.info("Waiting for the first pick...")
 
         with col_vote:
+            # --- SMASH ALERT (ID-BASED FILTERING) ---
             st.subheader("🔥 Startup Smash Alert")
             smashes = []
             
-            # 2. UPDATED MATCHING: Compare normalized names to exclude drafted players
             for name, adp in startup_adp.items():
-                if name.strip().lower() not in drafted_names:
+                # Map the name in your dictionary to an actual Sleeper ID
+                pid = next((k for k, v in player_map.items() 
+                           if f"{v.get('first_name', '')} {v.get('last_name', '')}".lower() == name.lower()), None)
+                
+                # Check if the player is still available using their unique ID
+                if pid and pid not in drafted_ids:
                     if current_pick_no > (adp + 4):
-                        smashes.append({"Player": name, "ADP": adp, "Value": f"+{round(current_pick_no - adp, 1)}"})
+                        smashes.append({
+                            "Player": name, 
+                            "ADP": adp, 
+                            "Value": f"+{round(current_pick_no - adp, 1)} spots"
+                        })
             
             if smashes:
                 st.success(f"⚠️ VALUE DETECTED!")
                 st.table(pd.DataFrame(smashes))
             else:
-                st.info("No major values falling yet.")
+                st.info("No major values falling past ADP yet.")
 
-# Initial run
+            st.divider()
+            st.subheader("🗳️ Vote for the Next Pick")
+            
+            avail = []
+            for p_id, info in player_map.items():
+                if p_id not in drafted_ids and info.get('active'):
+                    adp_rank = info.get('search_rank') or 999
+                    avail.append({
+                        "name": f"{info.get('first_name', '')} {info.get('last_name', '')} ({info.get('position', '')})", 
+                        "rank": adp_rank
+                    })
+            
+            top_options = sorted(avail, key=lambda x: x['rank'])[:300]
+            player_names = [p['name'] for p in top_options]
+            
+            vote_choice = st.selectbox("Search Player:", ["-- Choose Player --"] + player_names)
+            
+            if st.button("Cast Vote"):
+                if vote_choice != "-- Choose Player --":
+                    new_vote = pd.DataFrame([{"Player": vote_choice, "Votes": 1, "Last_Seen": time.time()}])
+                    updated_df = pd.concat([all_data, new_vote], ignore_index=True)
+                    conn.update(spreadsheet=SHEET_URL, data=updated_df)
+                    st.balloons()
+                    st.rerun()
+
+# Initial Render
 render_content()
 
-# Auto-Refresh if enabled
+# Loop for Live Refresh
 if live_mode:
     time.sleep(30)
     st.rerun()
