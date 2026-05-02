@@ -51,11 +51,6 @@ if "user_session_id" not in st.session_state:
     st.session_state.user_session_id = str(time.time())
 
 current_time = time.time()
-presence_row = pd.DataFrame([{
-    "Session_ID": st.session_state.user_session_id, 
-    "Last_Seen": current_time
-}])
-
 if "Last_Seen" in all_data.columns:
     active_users_df = all_data[all_data["Last_Seen"] > (current_time - 30)]
     active_count = active_users_df["Session_ID"].nunique()
@@ -73,7 +68,7 @@ m2.metric("🗳️ Total Votes Cast", len(all_data[all_data["Votes"] == 1]) if "
 with st.sidebar:
     st.header(f"🛡️ Team {MY_USERNAME}")
     my_picks = [
-        f"{p['metadata']['first_name']} {p['metadata']['last_name']} ({p['metadata']['position']})" 
+        f"{p['metadata'].get('first_name', '')} {p['metadata'].get('last_name', '')} ({p['metadata'].get('position', '')})" 
         for p in picks if str(p.get('picked_by')) == str(my_user_id)
     ]
     if my_picks:
@@ -88,28 +83,29 @@ col_board, col_vote = st.columns([2, 1])
 with col_board:
     st.subheader("📜 Live Draft Board")
     if picks and len(picks) > 0:
-        board_data = []
+        board_list = []
         for p in picks:
             is_me = str(p.get('picked_by')) == str(my_user_id)
-            board_data.append({
+            board_list.append({
                 "Pick": p['pick_no'],
                 "Player": f"{p['metadata'].get('first_name', '')} {p['metadata'].get('last_name', '')}",
                 "Pos": p['metadata'].get('position', 'N/A'),
                 "Team": p['metadata'].get('team', 'N/A'),
                 "Owner": "TIZBOS" if is_me else "OPPONENT",
-                "Is_Me": is_me
+                "is_me": is_me
             })
         
-        df = pd.DataFrame(board_data).iloc[::-1]
+        # Create DataFrame and sort newest first
+        df = pd.DataFrame(board_list).iloc[::-1]
         
-        # Color function with safety check
-        def color_pick_row(row):
-            if row.Is_Me:
-                return ['background-color: #1b5e20; color: white'] * len(row)
-            return ['background-color: #b71c1c; color: white'] * len(row)
+        # Define the styling function using the 'is_me' column directly
+        def apply_row_style(row):
+            color = 'background-color: #1b5e20; color: white' if row.is_me else 'background-color: #b71c1c; color: white'
+            return [color] * len(row)
 
-        # We display the table only if df is not empty
-        st.table(df[['Pick', 'Player', 'Pos', 'Team', 'Owner']].style.apply(color_pick_row, axis=1))
+        # Apply style to all columns, then display only the ones we want
+        styled_df = df.style.apply(apply_row_style, axis=1)
+        st.table(styled_df.hide(axis="index").columns(['Pick', 'Player', 'Pos', 'Team', 'Owner']))
     else:
         st.info("No picks made yet. The board will appear once the first player is drafted!")
 
